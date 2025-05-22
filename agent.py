@@ -85,18 +85,18 @@ class Mario:
         reward (float),
         done(bool))
         """
-        if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
-            state = np.array(state)
-        if isinstance(next_state, list) and all(isinstance(x, np.ndarray) for x in next_state):
-            next_state = np.array(next_state)
+        if isinstance(state, torch.Tensor):
+            state = state.cpu().numpy()
+        if isinstance(next_state, torch.Tensor):
+            next_state = next_state.cpu().numpy()
 
-        state = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
-        next_state = torch.FloatTensor(next_state).cuda() if self.use_cuda else torch.FloatTensor(next_state)
-        action = torch.LongTensor([action]).cuda() if self.use_cuda else torch.LongTensor([action])
-        reward = torch.DoubleTensor([reward]).cuda() if self.use_cuda else torch.DoubleTensor([reward])
-        done = torch.BoolTensor([done]).cuda() if self.use_cuda else torch.BoolTensor([done])
-
-        self.memory.append((state, next_state, action, reward, done))
+        self.memory.append((
+            np.array(state, copy=False),
+            np.array(next_state, copy=False),
+            int(action),
+            float(reward),
+            bool(done)
+        ))
 
 
     def recall(self):
@@ -104,8 +104,15 @@ class Mario:
         Retrieve a batch of experiences from memory
         """
         batch = random.sample(self.memory, self.batch_size)
-        state, next_state, action, reward, done = map(torch.stack, zip(*batch))
-        return state, next_state, action.squeeze(), reward.squeeze(), done.squeeze()
+        states, next_states, actions, rewards, dones = map(np.array, zip(*batch))
+
+        return (
+            torch.tensor(states, dtype=torch.float32),
+            torch.tensor(next_states, dtype=torch.float32),
+            torch.tensor(actions, dtype=torch.int64),
+            torch.tensor(rewards, dtype=torch.float32),
+            torch.tensor(dones, dtype=torch.bool)
+        )
 
 
     def td_estimate(self, state, action):
