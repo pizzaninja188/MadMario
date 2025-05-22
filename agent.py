@@ -123,7 +123,7 @@ class Mario:
 
     def update_Q_online(self, td_estimate, td_target):
         self.optimizer.zero_grad()
-        with torch.amp.autocast():
+        with torch.amp.autocast(device_type='cuda' if self.use_cuda else 'cpu'):
             loss = self.loss_fn(td_estimate, td_target)
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
