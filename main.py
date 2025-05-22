@@ -53,58 +53,45 @@ start_episode = mario.episode
 torch.backends.cudnn.benchmark = True
 
 ### for Loop that train the model num_episodes times by playing the game
-try:
-    for e in range(start_episode, episodes):
+for e in range(start_episode, episodes):
 
-        state = env.reset()
+    state = env.reset()
 
-        # Play the game!
-        while True:
+    # Play the game!
+    while True:
 
-            # 3. Show environment (the visual) [WIP]
-            #env.render()
+        # 3. Show environment (the visual) [WIP]
+        #env.render()
 
-            # 4. Run agent on the state
-            action = mario.act(state)
+        # 4. Run agent on the state
+        action = mario.act(state)
 
-            # 5. Agent performs action
-            next_state, reward, done, info = env.step(action)
+        # 5. Agent performs action
+        next_state, reward, done, info = env.step(action)
 
-            # 6. Remember
-            mario.cache(state, next_state, action, reward, done)
+        # 6. Remember
+        mario.cache(state, next_state, action, reward, done)
 
-            # 7. Learn
-            q, loss = mario.learn()
+        # 7. Learn
+        q, loss = mario.learn()
 
-            # 8. Logging
-            logger.log_step(reward, loss, q)
+        # 8. Logging
+        logger.log_step(reward, loss, q)
 
-            # 9. Update state
-            state = next_state
+        # 9. Update state
+        state = next_state
 
-            # 10. Check if end of game
-            if done or info['flag_get']:
-                break
+        # 10. Check if end of game
+        if done or info['flag_get']:
+            break
 
-        logger.log_episode()
+    logger.log_episode()
 
-        if e % 20 == 0:
-            logger.record(
-                episode=e,
-                epsilon=mario.exploration_rate,
-                step=mario.curr_step
-            )
-        
-        mario.episode = e
-        
-        pass
-
-except KeyboardInterrupt:
-    print("\nTraining interrupted. Saving checkpoint...")
-    mario.save()  # or whatever your save method is
-    print("Checkpoint saved. Exiting gracefully.")
-
-except Exception as e:
-    print(f"Error occurred: {e}")
-    mario.save()  # or whatever your save method is
-    print("Checkpoint saved. Exiting gracefully.")
+    if e % 20 == 0:
+        logger.record(
+            episode=e,
+            epsilon=mario.exploration_rate,
+            step=mario.curr_step
+        )
+    
+    mario.episode = e
