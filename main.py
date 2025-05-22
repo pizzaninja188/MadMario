@@ -89,8 +89,6 @@ try:
         logger.log_episode()
 
         if e % 20 == 0:
-            print(torch.cuda.memory_allocated(torch.device('cuda')))
-            print(torch.cuda.max_memory_allocated(torch.device('cuda')))
             logger.record(
                 episode=e,
                 epsilon=mario.exploration_rate,
