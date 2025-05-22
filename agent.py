@@ -61,7 +61,8 @@ class Mario:
         else:
             if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
                 state = np.array(state)
-            state = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
+            state = np.array(state, dtype=np.float32)  # Convert list of arrays to a single array
+            state = torch.from_numpy(state).cuda() if self.use_cuda else torch.from_numpy(state)
             state = state.unsqueeze(0)
             action_values = self.net(state, model='online')
             action_idx = torch.argmax(action_values, axis=1).item()
