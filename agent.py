@@ -13,7 +13,7 @@ class Mario:
     def __init__(self, state_dim, action_dim, save_dir, checkpoint=None):
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.memory = deque(maxlen=100000)
+        self.memory = deque(maxlen=50000)
         self.batch_size = 32
 
         self.exploration_rate = 1
@@ -22,11 +22,11 @@ class Mario:
         self.gamma = 0.9
 
         self.curr_step = 0
-        self.burnin = 1e5  # min. experiences before training
-        self.learn_every = 3   # no. of experiences between updates to Q_online
+        self.burnin = 10000  # min. experiences before training
+        self.learn_every = 1   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
-        self.save_every = 100000   # no. of experiences between saving Mario Net
+        self.save_every = 20000   # no. of experiences between saving Mario Net
         self.save_dir = save_dir
         self.episode = 0
 
