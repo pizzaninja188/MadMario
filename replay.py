@@ -29,7 +29,11 @@ env.reset()
 save_dir = Path('checkpoints') / datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
 save_dir.mkdir(parents=True)
 
-checkpoint = Path('checkpoints/2025-05-21T20-24-49/mario_net_14.chkpt')
+def get_latest_checkpoint():
+    all_checkpoints = sorted(Path("checkpoints").rglob("mario_net_*.chkpt"))
+    return all_checkpoints[-1] if all_checkpoints else None
+
+checkpoint = get_latest_checkpoint()
 mario = Mario(state_dim=(4, 84, 84), action_dim=env.action_space.n, save_dir=save_dir, checkpoint=checkpoint)
 mario.exploration_rate = mario.exploration_rate_min
 

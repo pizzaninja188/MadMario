@@ -1,6 +1,9 @@
+import os
 import torch
 import random, numpy as np
 from pathlib import Path
+
+import torch.amp
 
 from neural import MarioNet
 from collections import deque
@@ -11,7 +14,7 @@ class Mario:
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.memory = deque(maxlen=100000)
-        self.batch_size = 1024
+        self.batch_size = 32
 
         self.exploration_rate = 1
         self.exploration_rate_decay = 0.99999975
@@ -23,11 +26,12 @@ class Mario:
         self.learn_every = 3   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
-        self.save_every = 5e5   # no. of experiences between saving Mario Net
+        self.save_every = 100000   # no. of experiences between saving Mario Net
         self.save_dir = save_dir
+        self.episode = 0
 
         self.use_cuda = torch.cuda.is_available()
-        self.scaler = torch.cuda.amp.GradScaler()
+        self.scaler = torch.amp.GradScaler()
 
         # Mario's DNN to predict the most optimal action - we implement this in the Learn section
         self.net = MarioNet(self.state_dim, self.action_dim).float()
@@ -119,7 +123,7 @@ class Mario:
 
     def update_Q_online(self, td_estimate, td_target):
         self.optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast():
             loss = self.loss_fn(td_estimate, td_target)
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
@@ -163,8 +167,13 @@ class Mario:
         save_path = self.save_dir / f"mario_net_{int(self.curr_step // self.save_every)}.chkpt"
         torch.save(
             dict(
-                model=self.net.state_dict(),
-                exploration_rate=self.exploration_rate
+                online_model=self.net.online.state_dict(),
+                target_model=self.net.target.state_dict(),
+                #optimizer=self.optimizer.state_dict(),
+                exploration_rate=self.exploration_rate,
+                curr_step=self.curr_step,
+                episode=self.episode,
+                memory=list(self.memory)
             ),
             save_path
         )
@@ -172,13 +181,20 @@ class Mario:
 
 
     def load(self, load_path):
-        if not load_path.exists():
-            raise ValueError(f"{load_path} does not exist")
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"No checkpoint found at {load_path}")
 
-        ckp = torch.load(load_path, map_location=('cuda' if self.use_cuda else 'cpu'))
-        exploration_rate = ckp.get('exploration_rate')
-        state_dict = ckp.get('model')
+        checkpoint = torch.load(load_path, map_location=('cuda' if self.use_cuda else 'cpu'))
 
-        print(f"Loading model at {load_path} with exploration rate {exploration_rate}")
-        self.net.load_state_dict(state_dict)
-        self.exploration_rate = exploration_rate
+        self.net.online.load_state_dict(checkpoint["online_model"])
+        self.net.target.load_state_dict(checkpoint["target_model"])
+        #self.optimizer.load_state_dict(checkpoint["optimizer"])
+
+        self.exploration_rate = checkpoint.get("exploration_rate", 1.0)
+        self.curr_step = checkpoint.get("curr_step", 0)
+        self.episode = checkpoint.get("episode", 0)
+
+        if "memory" in checkpoint:
+            self.memory = deque(checkpoint["memory"], maxlen=self.memory.maxlen)
+
+        print(f"Loaded model from {load_path} at step {self.curr_step}, episode {self.episode}, exploration rate {self.exploration_rate}")

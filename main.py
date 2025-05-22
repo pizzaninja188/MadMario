@@ -39,17 +39,22 @@ env.reset()
 save_dir = Path('checkpoints') / datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
 save_dir.mkdir(parents=True)
 
-checkpoint = Path('checkpoints/2025-05-21T21-22-47/mario_net_0.chkpt')
+def get_latest_checkpoint():
+    all_checkpoints = sorted(Path("checkpoints").rglob("mario_net_*.chkpt"))
+    return all_checkpoints[-1] if all_checkpoints else None
+
+checkpoint = get_latest_checkpoint()
 mario = Mario(state_dim=(4, 84, 84), action_dim=env.action_space.n, save_dir=save_dir, checkpoint=checkpoint)
 
 logger = MetricLogger(save_dir)
 
 episodes = 40000
+start_episode = mario.episode
 torch.backends.cudnn.benchmark = True
 
 ### for Loop that train the model num_episodes times by playing the game
 try:
-    for e in range(episodes):
+    for e in range(start_episode, episodes):
 
         state = env.reset()
 
@@ -57,7 +62,7 @@ try:
         while True:
 
             # 3. Show environment (the visual) [WIP]
-            env.render()
+            #env.render()
 
             # 4. Run agent on the state
             action = mario.act(state)
@@ -92,9 +97,16 @@ try:
                 step=mario.curr_step
             )
         
+        mario.episode = e
+        
         pass
 
 except KeyboardInterrupt:
     print("\nTraining interrupted. Saving checkpoint...")
+    mario.save()  # or whatever your save method is
+    print("Checkpoint saved. Exiting gracefully.")
+
+except Exception as e:
+    print(f"Error occurred: {e}")
     mario.save()  # or whatever your save method is
     print("Checkpoint saved. Exiting gracefully.")
