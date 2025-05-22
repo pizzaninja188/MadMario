@@ -23,7 +23,7 @@ class Mario:
 
         self.curr_step = 0
         self.burnin = 10000  # min. experiences before training
-        self.learn_every = 1   # no. of experiences between updates to Q_online
+        self.learn_every = 3   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
         self.save_every = 20000   # no. of experiences between saving Mario Net
