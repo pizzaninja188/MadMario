@@ -1,4 +1,7 @@
+import os
 import torch
+from torch.amp.grad_scaler import GradScaler
+from torch.amp.autocast_mode import autocast
 import random, numpy as np
 from pathlib import Path
 
@@ -27,7 +30,9 @@ class Mario:
         self.save_dir = save_dir
 
         self.use_cuda = torch.cuda.is_available()
-        self.scaler = torch.cuda.amp.GradScaler()
+        self.scaler = GradScaler(device='cuda')
+        
+        self.episode = 0
 
         # Mario's DNN to predict the most optimal action - we implement this in the Learn section
         self.net = MarioNet(self.state_dim, self.action_dim).float()
@@ -69,30 +74,77 @@ class Mario:
         # increment step
         self.curr_step += 1
         return action_idx
-
-    def cache(self, state, next_state, action, reward, done):
+    
+    def act_batch(self, states):
         """
-        Store the experience to self.memory (replay buffer)
+        Choose epsilon-greedy actions for a batch of states.
 
         Inputs:
-        state (LazyFrame),
-        next_state (LazyFrame),
-        action (int),
-        reward (float),
-        done(bool))
+        states (np.ndarray or list): batch of states, shape (batch_size, ...)
+
+        Outputs:
+        actions (List[int]): list of actions for each state in the batch
         """
-        if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
-            state = np.array(state)
-        if isinstance(next_state, list) and all(isinstance(x, np.ndarray) for x in next_state):
-            next_state = np.array(next_state)
+        batch_size = len(states)
+        actions = []
 
-        state = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
-        next_state = torch.FloatTensor(next_state).cuda() if self.use_cuda else torch.FloatTensor(next_state)
-        action = torch.LongTensor([action]).cuda() if self.use_cuda else torch.LongTensor([action])
-        reward = torch.DoubleTensor([reward]).cuda() if self.use_cuda else torch.DoubleTensor([reward])
-        done = torch.BoolTensor([done]).cuda() if self.use_cuda else torch.BoolTensor([done])
+        for i in range(batch_size):
+            if np.random.rand() < self.exploration_rate:
+                action_idx = np.random.randint(self.action_dim)
+            else:
+                state = states[i]
+                if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
+                    state = np.array(state)
+                state_t = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
+                state_t = state_t.unsqueeze(0)
+                with torch.no_grad():
+                    action_values = self.net(state_t, model='online')
+                    action_idx = torch.argmax(action_values, axis=1).item()
+            actions.append(action_idx)
 
-        self.memory.append((state, next_state, action, reward, done))
+        # Decay exploration rate once per batch call
+        self.exploration_rate *= self.exploration_rate_decay
+        self.exploration_rate = max(self.exploration_rate_min, self.exploration_rate)
+
+        # Increment steps by batch size
+        self.curr_step += batch_size
+
+        return actions
+
+    def cache(self, states, next_states, actions, rewards, dones):
+        """
+        Store a batch of experiences to self.memory (replay buffer).
+
+        Inputs:
+        states (np.ndarray or list): batch of states, shape (batch_size, ...)
+        next_states (np.ndarray or list): batch of next states, shape (batch_size, ...)
+        actions (list or np.ndarray): batch of actions, shape (batch_size,)
+        rewards (list or np.ndarray): batch of rewards, shape (batch_size,)
+        dones (list or np.ndarray): batch of done flags, shape (batch_size,)
+        """
+        batch_size = len(states)
+
+        for i in range(batch_size):
+            state = states[i]
+            next_state = next_states[i]
+            action = actions[i]
+            reward = rewards[i]
+            done = dones[i]
+
+            # Convert states to numpy arrays if needed
+            if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
+                state = np.array(state)
+            if isinstance(next_state, list) and all(isinstance(x, np.ndarray) for x in next_state):
+                next_state = np.array(next_state)
+
+            device = torch.device('cuda' if self.use_cuda else 'cpu')
+            state_t = torch.FloatTensor(state).to(device)
+            next_state_t = torch.FloatTensor(next_state).to(device)
+            action_t = torch.LongTensor([action]).to(device)
+            reward_t = torch.FloatTensor([reward]).to(device)
+            done_t = torch.BoolTensor([done]).to(device)
+
+            self.memory.append((state_t, next_state_t, action_t, reward_t, done_t))
 
 
     def recall(self):
@@ -119,7 +171,7 @@ class Mario:
 
     def update_Q_online(self, td_estimate, td_target):
         self.optimizer.zero_grad()
-        with torch.cuda.amp.autocast():
+        with autocast(device_type='cuda'):
             loss = self.loss_fn(td_estimate, td_target)
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
@@ -144,13 +196,19 @@ class Mario:
         if self.curr_step % self.learn_every != 0:
             return None, None
 
-        # Sample from memory
+        # Sample batch from memory
         state, next_state, action, reward, done = self.recall()
+        if self.use_cuda:
+            state = state.cuda()
+            next_state = next_state.cuda()
+            action = action.cuda()
+            reward = reward.cuda()
+            done = done.cuda()
 
-        # Get TD Estimate
+        # TD estimate
         td_est = self.td_estimate(state, action)
 
-        # Get TD Target
+        # TD target
         td_tgt = self.td_target(reward, next_state, done)
 
         # Backpropagate loss through Q_online
@@ -163,22 +221,32 @@ class Mario:
         save_path = self.save_dir / f"mario_net_{int(self.curr_step // self.save_every)}.chkpt"
         torch.save(
             dict(
-                model=self.net.state_dict(),
-                exploration_rate=self.exploration_rate
+                online_model=self.net.online.state_dict(),
+                target_model=self.net.target.state_dict(),
+                exploration_rate=self.exploration_rate,
+                memory=list(self.memory),
+                curr_step=self.curr_step,
+                episode=self.episode
             ),
             save_path
         )
-        print(f"MarioNet saved to {save_path} at step {self.curr_step}")
+        print(f"MarioNet saved to {save_path} at step {self.curr_step}, episode {self.episode}")
 
 
     def load(self, load_path):
-        if not load_path.exists():
-            raise ValueError(f"{load_path} does not exist")
+        if not os.path.exists(load_path):
+            raise FileNotFoundError(f"No checkpoint found at {load_path}")
 
-        ckp = torch.load(load_path, map_location=('cuda' if self.use_cuda else 'cpu'))
-        exploration_rate = ckp.get('exploration_rate')
-        state_dict = ckp.get('model')
+        checkpoint = torch.load(load_path, map_location=('cuda' if self.use_cuda else 'cpu'))
+        
+        self.net.online.load_state_dict(checkpoint["online_model"])
+        self.net.target.load_state_dict(checkpoint["target_model"])
+        
+        self.exploration_rate = checkpoint.get("exploration_rate", 1.0)
+        self.curr_step = checkpoint.get("curr_step", 0)
+        self.episode = checkpoint.get("episode", 0)
 
-        print(f"Loading model at {load_path} with exploration rate {exploration_rate}")
-        self.net.load_state_dict(state_dict)
-        self.exploration_rate = exploration_rate
+        if "memory" in checkpoint:
+            self.memory = deque(checkpoint["memory"], maxlen=self.memory.maxlen)
+
+        print(f"Loaded model from {load_path} at step {self.curr_step}, episode {self.episode}, exploration rate {self.exploration_rate}")

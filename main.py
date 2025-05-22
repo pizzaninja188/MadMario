@@ -1,100 +1,95 @@
 import os
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
-import random, datetime
+import datetime
 from pathlib import Path
-
 import torch
-
 import gym
 import gym_super_mario_bros
-from gym.wrappers import FrameStack, GrayScaleObservation, TransformObservation
+from gym.vector import AsyncVectorEnv
 from nes_py.wrappers import JoypadSpace
 
-from metrics import MetricLogger
-from agent import Mario
 from wrappers import ResizeObservation, SkipFrame
+from agent import Mario
+from metrics import MetricLogger
 
-# Initialize Super Mario environment
-env = gym_super_mario_bros.make('SuperMarioBros-1-1-v0')
+from gym.wrappers import FrameStack, GrayScaleObservation, TransformObservation
 
-# Limit the action-space to
-#   0. walk right
-#   1. jump right
-env = JoypadSpace(
-    env,
-    [['right'],
-    ['right', 'A']]
-)
+def make_env():
+    def _thunk():
+        env = gym_super_mario_bros.make('SuperMarioBros-1-1-v0')
+        env = JoypadSpace(env, [['right'], ['right', 'A']])
+        env = SkipFrame(env, skip=4)
+        env = GrayScaleObservation(env, keep_dim=False)
+        env = ResizeObservation(env, shape=84)
+        env = TransformObservation(env, f=lambda x: x / 255.)
+        env = FrameStack(env, 4)
+        return env
+    return _thunk
 
-# Apply Wrappers to environment
-env = SkipFrame(env, skip=4)
-env = GrayScaleObservation(env, keep_dim=False)
-env = ResizeObservation(env, shape=84)
-env = TransformObservation(env, f=lambda x: x / 255.)
-env = FrameStack(env, num_stack=4)
+if __name__ == '__main__':
+    torch.backends.cudnn.benchmark = True
+    torch.set_num_threads(1)  # Prevent PyTorch from hogging CPU
 
-env.reset()
+    num_envs = 2
+    envs = AsyncVectorEnv([make_env() for _ in range(num_envs)])
 
-save_dir = Path('checkpoints') / datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-save_dir.mkdir(parents=True)
+    save_dir = Path("checkpoints") / datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    save_dir.mkdir(parents=True)
 
-checkpoint = Path('checkpoints/2025-05-21T21-22-47/mario_net_0.chkpt')
-mario = Mario(state_dim=(4, 84, 84), action_dim=env.action_space.n, save_dir=save_dir, checkpoint=checkpoint)
+    def get_latest_checkpoint():
+        all_checkpoints = sorted(Path("checkpoints").rglob("mario_net_*.chkpt"))
+        return all_checkpoints[-1] if all_checkpoints else None
 
-logger = MetricLogger(save_dir)
+    checkpoint = get_latest_checkpoint()
+    mario = Mario(state_dim=(4, 84, 84), action_dim=envs.single_action_space.n, save_dir=save_dir, checkpoint=checkpoint)
+    start_episode = mario.episode if checkpoint else 0
+    logger = MetricLogger(save_dir)
 
-episodes = 40000
-torch.backends.cudnn.benchmark = True
+    episodes = 40000
+    episode_rewards = [0.0] * num_envs
+    last_recorded = mario.episode
 
-### for Loop that train the model num_episodes times by playing the game
-try:
-    for e in range(episodes):
+    try:
+        states = envs.reset()
 
-        state = env.reset()
+        for episode in range(start_episode, episodes):
+            actions = mario.act_batch(states)
+            next_states, rewards, dones, infos = envs.step(actions)
 
-        # Play the game!
-        while True:
+            # cache and learn
+            mario.cache(states, next_states, actions, rewards, dones)
+            q_values, losses = mario.learn()
 
-            # 3. Show environment (the visual) [WIP]
-            env.render()
+            avg_q = sum(q_values) / len(q_values) if q_values else 0
+            avg_loss = sum(losses) / len(losses) if losses else 0
 
-            # 4. Run agent on the state
-            action = mario.act(state)
+            # Log per step
+            logger.log_step(sum(rewards), avg_loss, avg_q)
 
-            # 5. Agent performs action
-            next_state, reward, done, info = env.step(action)
+            for i, done in enumerate(dones):
+                episode_rewards[i] += rewards[i]
+                if done:
+                    logger.log_episode()
+                    print(f"Env {i} finished episode {mario.episode + 1} with reward {episode_rewards[i]}")
+                    episode_rewards[i] = 0
+                    mario.episode += 1
 
-            # 6. Remember
-            mario.cache(state, next_state, action, reward, done)
+            states = next_states
 
-            # 7. Learn
-            q, loss = mario.learn()
+            # Periodic logging every 20 total episodes
+            if mario.episode - last_recorded >= 20:
+                logger.record(
+                    episode=mario.episode,
+                    epsilon=mario.exploration_rate,
+                    step=mario.curr_step
+                )
+                last_recorded = mario.episode
+                pass
+            
+            mario.episode += 1
 
-            # 8. Logging
-            logger.log_step(reward, loss, q)
-
-            # 9. Update state
-            state = next_state
-
-            # 10. Check if end of game
-            if done or info['flag_get']:
-                break
-
-        logger.log_episode()
-
-        if e % 20 == 0:
-            print(torch.cuda.memory_allocated(torch.device('cuda')))
-            print(torch.cuda.max_memory_allocated(torch.device('cuda')))
-            logger.record(
-                episode=e,
-                epsilon=mario.exploration_rate,
-                step=mario.curr_step
-            )
-        
-        pass
-
-except KeyboardInterrupt:
-    print("\nTraining interrupted. Saving checkpoint...")
-    mario.save()  # or whatever your save method is
-    print("Checkpoint saved. Exiting gracefully.")
+    except KeyboardInterrupt:
+        print("\nTraining interrupted. Saving checkpoint...")
+        mario.save()
+        print("Checkpoint saved. Exiting gracefully.")
