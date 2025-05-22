@@ -26,7 +26,7 @@ class Mario:
         self.learn_every = 3   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
-        self.save_every = 100000   # no. of experiences between saving Mario Net
+        self.save_every = 3000   # no. of experiences between saving Mario Net
         self.save_dir = save_dir
         self.episode = 0
 
@@ -37,12 +37,12 @@ class Mario:
         self.net = MarioNet(self.state_dim, self.action_dim).float()
         if self.use_cuda:
             self.net = self.net.to(device='cuda')
-        if checkpoint:
-            self.load(checkpoint)
-
+        
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=0.00025)
         self.loss_fn = torch.nn.SmoothL1Loss()
 
+        if checkpoint:
+            self.load(checkpoint)
 
     def act(self, state):
         """
@@ -165,15 +165,25 @@ class Mario:
 
     def save(self):
         save_path = self.save_dir / f"mario_net_{int(self.curr_step // self.save_every)}.chkpt"
+
+        # Convert all tensors in memory to CPU
+        safe_memory = []
+        for experience in self.memory:
+            cpu_experience = tuple(
+                x.detach().cpu() if isinstance(x, torch.Tensor) else x
+                for x in experience
+            )
+            safe_memory.append(cpu_experience)
+
         torch.save(
             dict(
                 online_model=self.net.online.state_dict(),
                 target_model=self.net.target.state_dict(),
-                #optimizer=self.optimizer.state_dict(),
+                optimizer=self.optimizer.state_dict(),
                 exploration_rate=self.exploration_rate,
                 curr_step=self.curr_step,
                 episode=self.episode,
-                memory=list(self.memory)
+                memory=safe_memory
             ),
             save_path
         )
@@ -188,7 +198,14 @@ class Mario:
 
         self.net.online.load_state_dict(checkpoint["online_model"])
         self.net.target.load_state_dict(checkpoint["target_model"])
-        #self.optimizer.load_state_dict(checkpoint["optimizer"])
+        # Load optimizer state
+        if "optimizer" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            if self.use_cuda:
+                for state in self.optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.cuda()
 
         self.exploration_rate = checkpoint.get("exploration_rate", 1.0)
         self.curr_step = checkpoint.get("curr_step", 0)
