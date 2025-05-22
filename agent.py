@@ -11,7 +11,7 @@ class Mario:
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.memory = deque(maxlen=100000)
-        self.batch_size = 32
+        self.batch_size = 1024
 
         self.exploration_rate = 1
         self.exploration_rate_decay = 0.99999975
@@ -27,6 +27,7 @@ class Mario:
         self.save_dir = save_dir
 
         self.use_cuda = torch.cuda.is_available()
+        self.scaler = torch.cuda.amp.GradScaler()
 
         # Mario's DNN to predict the most optimal action - we implement this in the Learn section
         self.net = MarioNet(self.state_dim, self.action_dim).float()
@@ -54,6 +55,8 @@ class Mario:
 
         # EXPLOIT
         else:
+            if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
+                state = np.array(state)
             state = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
             state = state.unsqueeze(0)
             action_values = self.net(state, model='online')
@@ -78,13 +81,18 @@ class Mario:
         reward (float),
         done(bool))
         """
+        if isinstance(state, list) and all(isinstance(x, np.ndarray) for x in state):
+            state = np.array(state)
+        if isinstance(next_state, list) and all(isinstance(x, np.ndarray) for x in next_state):
+            next_state = np.array(next_state)
+
         state = torch.FloatTensor(state).cuda() if self.use_cuda else torch.FloatTensor(state)
         next_state = torch.FloatTensor(next_state).cuda() if self.use_cuda else torch.FloatTensor(next_state)
         action = torch.LongTensor([action]).cuda() if self.use_cuda else torch.LongTensor([action])
         reward = torch.DoubleTensor([reward]).cuda() if self.use_cuda else torch.DoubleTensor([reward])
         done = torch.BoolTensor([done]).cuda() if self.use_cuda else torch.BoolTensor([done])
 
-        self.memory.append( (state, next_state, action, reward, done,) )
+        self.memory.append((state, next_state, action, reward, done))
 
 
     def recall(self):
@@ -109,11 +117,13 @@ class Mario:
         return (reward + (1 - done.float()) * self.gamma * next_Q).float()
 
 
-    def update_Q_online(self, td_estimate, td_target) :
-        loss = self.loss_fn(td_estimate, td_target)
+    def update_Q_online(self, td_estimate, td_target):
         self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        with torch.cuda.amp.autocast():
+            loss = self.loss_fn(td_estimate, td_target)
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
         return loss.item()
 
 

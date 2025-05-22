@@ -4,6 +4,8 @@ os.environ['KMP_DUPLICATE_LIB_OK']='True'
 import random, datetime
 from pathlib import Path
 
+import torch
+
 import gym
 import gym_super_mario_bros
 from gym.wrappers import FrameStack, GrayScaleObservation, TransformObservation
@@ -37,51 +39,62 @@ env.reset()
 save_dir = Path('checkpoints') / datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
 save_dir.mkdir(parents=True)
 
-checkpoint = None # Path('checkpoints/2020-10-21T18-25-27/mario.chkpt')
+checkpoint = Path('checkpoints/2025-05-21T21-22-47/mario_net_0.chkpt')
 mario = Mario(state_dim=(4, 84, 84), action_dim=env.action_space.n, save_dir=save_dir, checkpoint=checkpoint)
 
 logger = MetricLogger(save_dir)
 
 episodes = 40000
+torch.backends.cudnn.benchmark = True
 
 ### for Loop that train the model num_episodes times by playing the game
-for e in range(episodes):
+try:
+    for e in range(episodes):
 
-    state = env.reset()
+        state = env.reset()
 
-    # Play the game!
-    while True:
+        # Play the game!
+        while True:
 
-        # 3. Show environment (the visual) [WIP]
-        # env.render()
+            # 3. Show environment (the visual) [WIP]
+            env.render()
 
-        # 4. Run agent on the state
-        action = mario.act(state)
+            # 4. Run agent on the state
+            action = mario.act(state)
 
-        # 5. Agent performs action
-        next_state, reward, done, info = env.step(action)
+            # 5. Agent performs action
+            next_state, reward, done, info = env.step(action)
 
-        # 6. Remember
-        mario.cache(state, next_state, action, reward, done)
+            # 6. Remember
+            mario.cache(state, next_state, action, reward, done)
 
-        # 7. Learn
-        q, loss = mario.learn()
+            # 7. Learn
+            q, loss = mario.learn()
 
-        # 8. Logging
-        logger.log_step(reward, loss, q)
+            # 8. Logging
+            logger.log_step(reward, loss, q)
 
-        # 9. Update state
-        state = next_state
+            # 9. Update state
+            state = next_state
 
-        # 10. Check if end of game
-        if done or info['flag_get']:
-            break
+            # 10. Check if end of game
+            if done or info['flag_get']:
+                break
 
-    logger.log_episode()
+        logger.log_episode()
 
-    if e % 20 == 0:
-        logger.record(
-            episode=e,
-            epsilon=mario.exploration_rate,
-            step=mario.curr_step
-        )
+        if e % 20 == 0:
+            print(torch.cuda.memory_allocated(torch.device('cuda')))
+            print(torch.cuda.max_memory_allocated(torch.device('cuda')))
+            logger.record(
+                episode=e,
+                epsilon=mario.exploration_rate,
+                step=mario.curr_step
+            )
+        
+        pass
+
+except KeyboardInterrupt:
+    print("\nTraining interrupted. Saving checkpoint...")
+    mario.save()  # or whatever your save method is
+    print("Checkpoint saved. Exiting gracefully.")
