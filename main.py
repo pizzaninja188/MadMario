@@ -40,7 +40,14 @@ save_dir = Path('checkpoints') / datetime.datetime.now().strftime('%Y-%m-%dT%H-%
 save_dir.mkdir(parents=True)
 
 def get_latest_checkpoint():
-    all_checkpoints = sorted(Path("checkpoints").rglob("mario_net_*.chkpt"))
+    all_checkpoints = Path("checkpoints").rglob("mario_net_*.chkpt")
+    
+    # Extract step number and sort numerically
+    def extract_step(path):
+        match = re.search(r"mario_net_(\d+)\.chkpt", path.name)
+        return int(match.group(1)) if match else -1
+
+    all_checkpoints = sorted(all_checkpoints, key=extract_step)
     return all_checkpoints[-1] if all_checkpoints else None
 
 checkpoint = get_latest_checkpoint()
