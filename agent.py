@@ -198,8 +198,7 @@ class Mario:
                 optimizer=self.optimizer.state_dict(),
                 exploration_rate=self.exploration_rate,
                 curr_step=self.curr_step,
-                episode=self.episode,
-                memory=safe_memory
+                episode=self.episode
             ),
             save_path
         )
