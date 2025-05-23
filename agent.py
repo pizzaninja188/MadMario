@@ -26,7 +26,7 @@ class Mario:
         self.learn_every = 3   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
-        self.save_every = 20000   # no. of experiences between saving Mario Net
+        self.save_every = 100000   # no. of experiences between saving Mario Net
         self.save_dir = save_dir
         self.episode = 0
 
@@ -104,6 +104,9 @@ class Mario:
         """
         Retrieve a batch of experiences from memory
         """
+        if len(self.memory) < self.batch_size:
+            return None, None, None, None, None  # Not enough data yet
+        
         batch = random.sample(self.memory, self.batch_size)
         states, next_states, actions, rewards, dones = map(np.array, zip(*batch))
 
@@ -158,6 +161,8 @@ class Mario:
 
         # Sample from memory
         state, next_state, action, reward, done = self.recall()
+        if state is None:
+            return None, None  # Not enough samples yet
 
         # Move all tensors to device (cuda or cpu)
         device = torch.device('cuda' if self.use_cuda else 'cpu')
