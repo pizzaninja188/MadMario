@@ -104,6 +104,9 @@ class Mario:
         """
         Retrieve a batch of experiences from memory
         """
+        if len(self.memory) < self.batch_size:
+            return None, None, None, None, None  # Not enough data yet
+        
         batch = random.sample(self.memory, self.batch_size)
         states, next_states, actions, rewards, dones = map(np.array, zip(*batch))
 
@@ -158,6 +161,8 @@ class Mario:
 
         # Sample from memory
         state, next_state, action, reward, done = self.recall()
+        if state is None:
+            return None, None  # Not enough samples yet
 
         # Move all tensors to device (cuda or cpu)
         device = torch.device('cuda' if self.use_cuda else 'cpu')
