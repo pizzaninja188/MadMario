@@ -14,7 +14,7 @@ class Mario:
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.memory = deque(maxlen=50000)
-        self.batch_size = 32
+        self.batch_size = 16
 
         self.exploration_rate = 1
         self.exploration_rate_decay = 0.99999975
@@ -158,6 +158,14 @@ class Mario:
 
         # Sample from memory
         state, next_state, action, reward, done = self.recall()
+
+        # Move all tensors to device (cuda or cpu)
+        device = torch.device('cuda' if self.use_cuda else 'cpu')
+        state = state.to(device)
+        next_state = next_state.to(device)
+        action = action.to(device)
+        reward = reward.to(device)
+        done = done.to(device)
 
         # Get TD Estimate
         td_est = self.td_estimate(state, action)
