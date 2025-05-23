@@ -195,7 +195,7 @@ class Mario:
                 for x in experience
             )
             safe_memory.append(cpu_experience)
-
+            
         torch.save(
             dict(
                 online_model=self.net.online.state_dict(),
@@ -203,7 +203,8 @@ class Mario:
                 optimizer=self.optimizer.state_dict(),
                 exploration_rate=self.exploration_rate,
                 curr_step=self.curr_step,
-                episode=self.episode
+                episode=self.episode,
+                memory=self.memory
             ),
             save_path
         )
