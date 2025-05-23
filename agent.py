@@ -26,7 +26,7 @@ class Mario:
         self.learn_every = 3   # no. of experiences between updates to Q_online
         self.sync_every = 1e4   # no. of experiences between Q_target & Q_online sync
 
-        self.save_every = 20000   # no. of experiences between saving Mario Net
+        self.save_every = 100000   # no. of experiences between saving Mario Net
         self.save_dir = save_dir
         self.episode = 0
 
@@ -203,8 +203,7 @@ class Mario:
                 optimizer=self.optimizer.state_dict(),
                 exploration_rate=self.exploration_rate,
                 curr_step=self.curr_step,
-                episode=self.episode,
-                memory=self.memory
+                episode=self.episode
             ),
             save_path
         )
